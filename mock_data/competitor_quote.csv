@@ -1,0 +1,13 @@
+competitor_sku,product_name,quantity,competitor_price,product_image_url,notes
+COMP-PH100,"Phillips screws 1/4"" x 100pcs",5,14.50,https://competitor.com/ph-screws-100.jpg,"Standard phillips head screws"
+COMP-FH50,"Flat head screws 3/8"" x 50pc",3,17.25,https://competitor.com/fh-screws-50.jpg,"Countersunk flat head"
+COMP-NUT200,"M6 Hex nuts 200 count",10,9.75,https://competitor.com/m6-nuts.jpg,"Metric hex nuts"
+COMP-WASH500,"1/4"" Flat washers - 500 pack",2,7.85,https://competitor.com/washers-500.jpg,"Standard flat washers"
+COMP-BOLT25,"1/2"" x 3"" Carriage bolts 25pk",4,25.20,https://competitor.com/carriage-bolts.jpg,"Galvanized carriage bolts"
+COMP-DRILL29,"Drill bit set HSS 1/8-1/2"" 29pc",1,52.99,https://competitor.com/drill-set.jpg,"High speed steel bits"
+COMP-HAM16,"16oz claw hammer fiberglass",2,21.75,https://competitor.com/hammer.jpg,"Professional grade hammer"
+COMP-WRENCH10,"10"" adjustable wrench chrome",1,28.50,https://competitor.com/wrench.jpg,"Chrome plated wrench"
+COMP-SAW20,"20"" hand saw hardened blade",1,39.99,https://competitor.com/handsaw.jpg,"Crosscut hand saw"
+COMP-LEVEL24,"24"" aluminum spirit level",1,32.75,https://competitor.com/level.jpg,"Bubble level aluminum"
+COMP-PLIERS6,"6"" needle nose pliers grip",3,16.99,https://competitor.com/pliers.jpg,"Insulated grip pliers"
+COMP-TAPE25,"25ft measuring tape heavy duty",2,22.50,https://competitor.com/tape.jpg,"Magnetic tip tape measure"
