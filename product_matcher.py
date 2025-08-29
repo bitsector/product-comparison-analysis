@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI-Powered Product Matcher with Fishbowl WMS Integration
-Matches competitor products to internal catalog using OpenAI embeddings
+Matches competitor products to internal catalog using Google Gemini embeddings
 """
 
 import os
@@ -10,7 +10,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional
 import logging
 from dotenv import load_dotenv
-import openai
+import google.generativeai as genai
 from sklearn.metrics.pairwise import cosine_similarity
 import json
 from datetime import datetime
@@ -29,8 +29,8 @@ class ProductMatcher:
     """Main class for matching competitor products to Fishbowl inventory"""
     
     def __init__(self):
-        """Initialize the ProductMatcher with OpenAI client and configuration"""
-        self.openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        """Initialize the ProductMatcher with Gemini client and configuration"""
+        genai.configure(api_key=os.getenv('GOOGLE_AI_API_KEY'))
         self.confidence_threshold = float(os.getenv('MATCH_CONFIDENCE_THRESHOLD', 0.7))
         self.fishbowl_data = None
         self.competitor_data = None
@@ -59,13 +59,14 @@ class ProductMatcher:
             raise
     
     def get_text_embedding(self, text: str) -> List[float]:
-        """Get text embedding using OpenAI's text-embedding-3-small model"""
+        """Get text embedding using Gemini's text embedding model"""
         try:
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text
+            result = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="semantic_similarity"
             )
-            return response.data[0].embedding
+            return result['embedding']
         except Exception as e:
             logger.error(f"Error getting embedding for text: {text[:50]}... - {e}")
             return []
@@ -212,7 +213,7 @@ class ProductMatcher:
 
 def main():
     """Main function to run the product matcher"""
-    logger.info("Starting AI-Powered Product Matcher")
+    logger.info("Starting AI-Powered Product Matcher (Gemini-powered)")
     
     try:
         # Initialize matcher

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AI-Powered Image Product Matcher with Fishbowl WMS Integration
-Matches competitor product images to internal catalog using OpenAI Vision models
+Matches competitor product images to internal catalog using Google Gemini Vision models
 Specialized for building materials: faucets, tiles, fixtures, hardware
 """
 
@@ -11,8 +11,7 @@ import numpy as np
 from typing import List, Dict
 import logging
 from dotenv import load_dotenv
-import openai
-import base64
+import google.generativeai as genai
 import json
 from datetime import datetime
 import glob
@@ -31,9 +30,10 @@ class ImageProductMatcher:
     """Main class for matching competitor product images to Fishbowl inventory"""
     
     def __init__(self):
-        """Initialize the ImageProductMatcher with OpenAI client and configuration"""
-        self.openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        """Initialize the ImageProductMatcher with Gemini client and configuration"""
+        genai.configure(api_key=os.getenv("GOOGLE_AI_API_KEY"))
+        self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.client = genai.GenerativeModel(self.model)
         self.confidence_threshold = float(os.getenv("MATCH_CONFIDENCE_THRESHOLD", 0.7))
         self.competitor_images_dir = "their_images/"
         self.our_images_dir = "our_images/"
@@ -46,23 +46,22 @@ class ImageProductMatcher:
         self.model_pricing = self._get_model_pricing()
         
     def _get_model_pricing(self) -> Dict[str, Dict[str, float]]:
-        """Get pricing information for different OpenAI models (per 1M tokens)"""
+        """Get pricing information for different Gemini models (per 1M tokens)"""
         pricing = {
-            "gpt-4.1": {"input": 2.00, "output": 8.00},
-            "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
-            "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
-            "gpt-4o": {"input": 2.50, "output": 10.00},
-            "gpt-4-turbo": {"input": 10.00, "output": 30.00},
-            "gpt-4o-mini": {"input": 0.15, "output": 0.60}
+            "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+            "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+            "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
+            "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+            "gemini-1.5-flash": {"input": 0.075, "output": 0.30}
         }
-        return pricing.get(self.model, {"input": 2.50, "output": 10.00})
+        return pricing.get(self.model, {"input": 0.30, "output": 2.50})
     
     def _track_usage(self, response) -> None:
         """Track API usage for cost calculation"""
-        if hasattr(response, 'usage'):
+        if hasattr(response, 'usage_metadata'):
             self.total_api_calls += 1
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
+            self.total_input_tokens += response.usage_metadata.prompt_token_count
+            self.total_output_tokens += response.usage_metadata.candidates_token_count
             
     def calculate_total_cost(self) -> Dict[str, float]:
         """Calculate total cost based on token usage"""
@@ -80,14 +79,15 @@ class ImageProductMatcher:
             "model_used": self.model
         }
         
-    def encode_image(self, image_path: str) -> str:
-        """Convert image to base64 for OpenAI API"""
+    def load_image_for_gemini(self, image_path: str):
+        """Load image file for Gemini API"""
         try:
-            with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode("utf-8")
+            import PIL.Image
+            image = PIL.Image.open(image_path)
+            return image
         except Exception as e:
-            logger.error(f"Error encoding image {image_path}: {e}")
-            return ""
+            logger.error(f"Error loading image {image_path}: {e}")
+            return None
     
     def get_building_materials_comparison_prompt(self) -> str:
         """Get specialized prompt for building materials industry image comparison"""
@@ -126,52 +126,32 @@ class ImageProductMatcher:
         """
 
     def compare_product_images(self, their_image_path: str, our_image_path: str) -> Dict:
-        """Compare two product images using OpenAI Vision model"""
+        """Compare two product images using Gemini Vision model"""
         try:
             # Log without revealing filenames to avoid hints
             logger.info(f"Comparing their image with catalog image")
             
-            their_b64 = self.encode_image(their_image_path)
-            our_b64 = self.encode_image(our_image_path)
+            their_image = self.load_image_for_gemini(their_image_path)
+            our_image = self.load_image_for_gemini(our_image_path)
             
-            if not their_b64 or not our_b64:
-                return {"error": "Failed to encode images"}
+            if their_image is None or our_image is None:
+                return {"error": "Failed to load images"}
             
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": self.get_building_materials_comparison_prompt()
-                            },
-                            {
-                                "type": "text", 
-                                "text": "FIRST PRODUCT IMAGE:"
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{their_b64}"}
-                            },
-                            {
-                                "type": "text",
-                                "text": "SECOND PRODUCT IMAGE:"
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{our_b64}"}
-                            }
-                        ]
-                    }
-                ]
-            )
+            prompt = f"""{self.get_building_materials_comparison_prompt()}
+            
+            FIRST PRODUCT IMAGE:
+            [Image will be provided]
+            
+            SECOND PRODUCT IMAGE:
+            [Image will be provided]
+            """
+            
+            response = self.client.generate_content([prompt, their_image, our_image])
             
             # Track usage for cost calculation
             self._track_usage(response)
             
-            comparison_result = response.choices[0].message.content
+            comparison_result = response.text
             
             # Parse the response to extract structured data
             parsed_result = self.parse_comparison_response(comparison_result)
@@ -425,7 +405,7 @@ class ImageProductMatcher:
 
 def main():
     """Main function to run the image product matcher"""
-    logger.info("Starting AI-Powered Image Product Matcher for Building Materials")
+    logger.info("Starting AI-Powered Image Product Matcher for Building Materials (Gemini-powered)")
     
     try:
         # Initialize matcher
