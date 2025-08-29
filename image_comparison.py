@@ -15,6 +15,13 @@ import google.generativeai as genai
 import json
 from datetime import datetime
 import glob
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import subprocess
+import tempfile
+import webbrowser
 
 # Load environment variables
 load_dotenv()
@@ -124,6 +131,138 @@ class ImageProductMatcher:
 
         Focus on functional compatibility for building contractors and architects making product substitutions.
         """
+
+    def display_image_comparison(self, their_image_path: str, our_image_path: str, 
+                               similarity_score: float, raw_analysis: str):
+        """Display two images side by side with comparison score"""
+        try:
+            # Create figure with side-by-side subplots (smaller size)
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+            
+            # Load and display their image
+            try:
+                their_img = mpimg.imread(their_image_path)
+                ax1.imshow(their_img)
+                ax1.set_title(f"THEIR PRODUCT\n{os.path.basename(their_image_path)}", 
+                            fontsize=14, fontweight='bold', pad=20)
+            except Exception as e:
+                ax1.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
+                        fontsize=16, transform=ax1.transAxes)
+                ax1.set_title(f"THEIR PRODUCT\n{os.path.basename(their_image_path)}", 
+                            fontsize=14, fontweight='bold', pad=20)
+            
+            ax1.axis('off')
+            
+            # Load and display our image
+            try:
+                our_img = mpimg.imread(our_image_path)
+                ax2.imshow(our_img)
+                ax2.set_title(f"OUR CATALOG PRODUCT\n{os.path.basename(our_image_path)}", 
+                            fontsize=14, fontweight='bold', pad=20)
+            except Exception as e:
+                ax2.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
+                        fontsize=16, transform=ax2.transAxes)
+                ax2.set_title(f"OUR CATALOG PRODUCT\n{os.path.basename(our_image_path)}", 
+                            fontsize=14, fontweight='bold', pad=20)
+            
+            ax2.axis('off')
+            
+            # Determine color and confidence level
+            if similarity_score >= 0.8:
+                color = 'green'
+                confidence = 'EXCELLENT MATCH'
+            elif similarity_score >= 0.6:
+                color = 'orange'
+                confidence = 'GOOD MATCH'
+            elif similarity_score >= 0.4:
+                color = 'gold'
+                confidence = 'WEAK MATCH'
+            else:
+                color = 'red'
+                confidence = 'POOR MATCH'
+            
+            # Add main title with similarity score
+            fig.suptitle(f'{confidence} - Similarity Score: {similarity_score:.3f}', 
+                        fontsize=20, fontweight='bold', color=color, y=0.95)
+            
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.85)
+            
+            # Save to file and open with system image viewer
+            os.makedirs("output", exist_ok=True)
+            timestamp = datetime.now().strftime("%H%M%S")
+            output_file = f"output/comparison_{timestamp}_{similarity_score:.3f}.png"
+            plt.savefig(output_file, dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            
+            # Try multiple methods to open the image, preferring native viewers
+            opened = False
+            
+            # Method 1: Try eog (Eye of GNOME - native Linux image viewer) with specific window size
+            try:
+                # eog will open in a reasonably sized window by default
+                subprocess.Popen(['eog', output_file], 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                opened = True
+                logger.info(f"🖼️  Opened comparison image in eog: {output_file}")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+            
+            # Method 2: Try other Linux image viewers
+            if not opened:
+                viewers = ['feh', 'gthumb', 'ristretto', 'gwenview', 'mirage']
+                for viewer in viewers:
+                    try:
+                        subprocess.Popen([viewer, output_file],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        opened = True
+                        logger.info(f"🖼️  Opened comparison image in {viewer}: {output_file}")
+                        break
+                    except FileNotFoundError:
+                        continue
+            
+            # Method 3: Try xdg-open as fallback (this was opening Pinta)
+            if not opened:
+                try:
+                    subprocess.run(['xdg-open', output_file], check=True, 
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    opened = True
+                    logger.info(f"🖼️  Opened comparison image with xdg-open: {output_file}")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+            
+            # Method 4: Try open (macOS) 
+            if not opened:
+                try:
+                    subprocess.run(['open', output_file], check=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    opened = True
+                    logger.info(f"🖼️  Opened comparison image: {output_file}")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    pass
+            
+            # Method 5: Try webbrowser as last resort
+            if not opened:
+                try:
+                    webbrowser.open(f'file://{os.path.abspath(output_file)}')
+                    opened = True
+                    logger.info(f"🖼️  Opened comparison image in browser: {output_file}")
+                except:
+                    pass
+            
+            if not opened:
+                logger.info(f"💾 Comparison image saved: {output_file}")
+                print(f"📸 Image comparison saved to: {output_file}")
+            
+        except Exception as e:
+            logger.error(f"Error displaying image comparison: {e}")
+            # Fallback to terminal display
+            print(f"\n{'='*80}")
+            print(f"🔍 IMAGE COMPARISON RESULTS")
+            print(f"THEIR IMAGE: {their_image_path}")
+            print(f"OUR IMAGE: {our_image_path}")
+            print(f"SIMILARITY SCORE: {similarity_score:.3f}")
+            print(f"{'='*80}\n")
 
     def compare_product_images(self, their_image_path: str, our_image_path: str) -> Dict:
         """Compare two product images using Gemini Vision model"""
@@ -276,6 +415,14 @@ class ImageProductMatcher:
                 logger.info(f"    🔴 POOR MATCH - Very low similarity")
                 
             logger.info(f"    ---")
+            
+            # Display the comparison visually in browser
+            self.display_image_comparison(
+                their_image_path, 
+                our_image_path, 
+                score, 
+                match_info.get('raw_analysis', 'No detailed analysis available')
+            )
         
         # Sort by similarity score (highest first)
         matches.sort(key=lambda x: x["similarity_score"], reverse=True)
