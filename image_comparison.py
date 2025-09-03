@@ -132,61 +132,161 @@ class ImageProductMatcher:
         Focus on functional compatibility for building contractors and architects making product substitutions.
         """
 
+    def resize_image_for_embedding(self, image_path: str, max_size: int = 256):
+        """Resize image to fit within API limits (36KB) while maintaining aspect ratio"""
+        import PIL.Image
+        import io
+        
+        image = PIL.Image.open(image_path)
+        original_size = image.size
+        
+        # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Start with a smaller max size to ensure we stay under 36KB
+        current_max_size = max_size
+        
+        while current_max_size > 64:  # Don't go too small
+            # Calculate new size maintaining aspect ratio
+            width, height = image.size
+            if max(width, height) > current_max_size:
+                if width > height:
+                    new_width = current_max_size
+                    new_height = int((height * current_max_size) / width)
+                else:
+                    new_height = current_max_size
+                    new_width = int((width * current_max_size) / height)
+                
+                resized_image = image.resize((new_width, new_height), PIL.Image.Resampling.LANCZOS)
+            else:
+                resized_image = image
+            
+            # Check if the image size is under 36KB when saved as JPEG
+            buffer = io.BytesIO()
+            resized_image.save(buffer, format='JPEG', quality=85, optimize=True)
+            size_bytes = buffer.tell()
+            
+            if size_bytes <= 35000:  # Leave some margin under 36KB
+                logger.debug(f"Resized {image_path} from {original_size[0]}x{original_size[1]} to {resized_image.size[0]}x{resized_image.size[1]} ({size_bytes} bytes)")
+                return resized_image
+            
+            # If still too large, reduce max size and try again
+            current_max_size = int(current_max_size * 0.8)
+        
+        # Final fallback - very small image
+        resized_image = image.resize((128, 128), PIL.Image.Resampling.LANCZOS)
+        logger.warning(f"Had to resize {image_path} to very small size (128x128) to fit API limits")
+        return resized_image
+
+    def get_image_embedding(self, image_path: str) -> List[float]:
+        """Get image description embedding using Gemini's vision + text embedding"""
+        try:
+            # Since multimodal embeddings are not available in Gemini API,
+            # we'll use vision model to describe the image, then embed the description
+            
+            # Step 1: Get image description using vision model
+            image = self.load_image_for_gemini(image_path)
+            if image is None:
+                return []
+            
+            description_prompt = """Describe this product image in detail for similarity matching. 
+            Focus on: product type, style, finish, mounting type, key features, and functional aspects.
+            Be specific and technical. Limit to 2-3 sentences."""
+            
+            response = self.client.generate_content([description_prompt, image])
+            description = response.text
+            
+            # Step 2: Get text embedding of the description
+            result = genai.embed_content(
+                model="models/gemini-embedding-001",
+                content=description,
+                task_type="semantic_similarity"
+            )
+            
+            logger.debug(f"Image description for {image_path}: {description[:100]}...")
+            return result['embedding']
+            
+        except Exception as e:
+            logger.error(f"Error getting image embedding for {image_path}: {e}")
+            return []
+    
+    def calculate_image_vector_similarity(self, their_image_path: str, our_image_path: str) -> float:
+        """Calculate cosine similarity between two images using embeddings (fast method)"""
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            their_embedding = self.get_image_embedding(their_image_path)
+            our_embedding = self.get_image_embedding(our_image_path)
+            
+            if not their_embedding or not our_embedding:
+                return 0.0
+            
+            similarity = cosine_similarity([their_embedding], [our_embedding])[0][0]
+            return float(similarity)
+            
+        except Exception as e:
+            logger.error(f"Error calculating image vector similarity: {e}")
+            return 0.0
+
     def display_image_comparison(self, their_image_path: str, our_image_path: str, 
                                similarity_score: float, raw_analysis: str):
         """Display two images side by side with comparison score"""
         try:
-            # Create figure with side-by-side subplots (smaller size)
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+            # Create figure with proper spacing and layout
+            fig = plt.figure(figsize=(14, 8))
             
-            # Load and display their image
-            try:
-                their_img = mpimg.imread(their_image_path)
-                ax1.imshow(their_img)
-                ax1.set_title(f"THEIR PRODUCT\n{os.path.basename(their_image_path)}", 
-                            fontsize=14, fontweight='bold', pad=20)
-            except Exception as e:
-                ax1.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
-                        fontsize=16, transform=ax1.transAxes)
-                ax1.set_title(f"THEIR PRODUCT\n{os.path.basename(their_image_path)}", 
-                            fontsize=14, fontweight='bold', pad=20)
+            # Create a grid layout with more control
+            gs = fig.add_gridspec(2, 2, height_ratios=[1, 4], width_ratios=[1, 1], 
+                                hspace=0.3, wspace=0.4, top=0.85, bottom=0.05, left=0.05, right=0.95)
             
-            ax1.axis('off')
-            
-            # Load and display our image
-            try:
-                our_img = mpimg.imread(our_image_path)
-                ax2.imshow(our_img)
-                ax2.set_title(f"OUR CATALOG PRODUCT\n{os.path.basename(our_image_path)}", 
-                            fontsize=14, fontweight='bold', pad=20)
-            except Exception as e:
-                ax2.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
-                        fontsize=16, transform=ax2.transAxes)
-                ax2.set_title(f"OUR CATALOG PRODUCT\n{os.path.basename(our_image_path)}", 
-                            fontsize=14, fontweight='bold', pad=20)
-            
-            ax2.axis('off')
-            
-            # Determine color and confidence level
-            if similarity_score >= 0.8:
+            # Add main title at the top
+            # Determine color and confidence level with normalized thresholds
+            if similarity_score >= 0.95:
                 color = 'green'
                 confidence = 'EXCELLENT MATCH'
-            elif similarity_score >= 0.6:
+            elif similarity_score >= 0.80:
                 color = 'orange'
                 confidence = 'GOOD MATCH'
-            elif similarity_score >= 0.4:
-                color = 'gold'
-                confidence = 'WEAK MATCH'
             else:
                 color = 'red'
                 confidence = 'POOR MATCH'
             
-            # Add main title with similarity score
-            fig.suptitle(f'{confidence} - Similarity Score: {similarity_score:.3f}', 
-                        fontsize=20, fontweight='bold', color=color, y=0.95)
+            # Add comparison result text at the very top
+            fig.text(0.5, 0.95, f'{confidence} - Similarity Score: {similarity_score:.3f}', 
+                    fontsize=18, fontweight='bold', color=color, ha='center', va='top')
             
-            plt.tight_layout()
-            plt.subplots_adjust(top=0.85)
+            # Left image
+            ax1 = fig.add_subplot(gs[1, 0])
+            try:
+                their_img = mpimg.imread(their_image_path)
+                ax1.imshow(their_img)
+            except Exception as e:
+                ax1.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
+                        fontsize=14, transform=ax1.transAxes)
+            ax1.axis('off')
+            
+            # Left image title - positioned above the image
+            fig.text(0.25, 0.88, 'THEIR PRODUCT', fontsize=12, fontweight='bold', 
+                    ha='center', va='center')
+            fig.text(0.25, 0.85, f'{os.path.basename(their_image_path)}', fontsize=10, 
+                    ha='center', va='center', style='italic')
+            
+            # Right image  
+            ax2 = fig.add_subplot(gs[1, 1])
+            try:
+                our_img = mpimg.imread(our_image_path)
+                ax2.imshow(our_img)
+            except Exception as e:
+                ax2.text(0.5, 0.5, 'Image not available', ha='center', va='center', 
+                        fontsize=14, transform=ax2.transAxes)
+            ax2.axis('off')
+            
+            # Right image title - positioned above the image
+            fig.text(0.75, 0.88, 'OUR CATALOG PRODUCT', fontsize=12, fontweight='bold', 
+                    ha='center', va='center')
+            fig.text(0.75, 0.85, f'{os.path.basename(our_image_path)}', fontsize=10, 
+                    ha='center', va='center', style='italic')
             
             # Save to file and open with system image viewer
             os.makedirs("output", exist_ok=True)
@@ -265,38 +365,55 @@ class ImageProductMatcher:
             print(f"{'='*80}\n")
 
     def compare_product_images(self, their_image_path: str, our_image_path: str) -> Dict:
-        """Compare two product images using Gemini Vision model"""
+        """Compare two product images using either prompt-based or vector-based method"""
+        comparison_method = os.getenv("IMAGE_COMPARISON_METHOD", "prompt").lower()
+        
         try:
-            # Log without revealing filenames to avoid hints
-            logger.info(f"Comparing their image with catalog image")
+            logger.info(f"Comparing images using {comparison_method} method")
             
-            their_image = self.load_image_for_gemini(their_image_path)
-            our_image = self.load_image_for_gemini(our_image_path)
+            if comparison_method == "vector":
+                # Fast vector-based comparison
+                similarity_score = self.calculate_image_vector_similarity(their_image_path, our_image_path)
+                
+                return {
+                    "similarity_score": similarity_score,
+                    "match_confidence": "HIGH" if similarity_score >= 0.95 else "MEDIUM" if similarity_score >= 0.80 else "LOW",
+                    "match_type": "VECTOR_SIMILARITY",
+                    "key_similarities": ["Vector-based similarity analysis"],
+                    "key_differences": ["Detailed analysis not available in vector mode"],
+                    "interchangeability": "YES" if similarity_score >= 0.90 else "NO",
+                    "raw_response": f"Vector similarity score: {similarity_score:.3f}"
+                }
             
-            if their_image is None or our_image is None:
-                return {"error": "Failed to load images"}
-            
-            prompt = f"""{self.get_building_materials_comparison_prompt()}
-            
-            FIRST PRODUCT IMAGE:
-            [Image will be provided]
-            
-            SECOND PRODUCT IMAGE:
-            [Image will be provided]
-            """
-            
-            response = self.client.generate_content([prompt, their_image, our_image])
-            
-            # Track usage for cost calculation
-            self._track_usage(response)
-            
-            comparison_result = response.text
-            
-            # Parse the response to extract structured data
-            parsed_result = self.parse_comparison_response(comparison_result)
-            parsed_result["raw_response"] = comparison_result
-            
-            return parsed_result
+            else:
+                # Detailed prompt-based comparison (original method)
+                their_image = self.load_image_for_gemini(their_image_path)
+                our_image = self.load_image_for_gemini(our_image_path)
+                
+                if their_image is None or our_image is None:
+                    return {"error": "Failed to load images"}
+                
+                prompt = f"""{self.get_building_materials_comparison_prompt()}
+                
+                FIRST PRODUCT IMAGE:
+                [Image will be provided]
+                
+                SECOND PRODUCT IMAGE:
+                [Image will be provided]
+                """
+                
+                response = self.client.generate_content([prompt, their_image, our_image])
+                
+                # Track usage for cost calculation
+                self._track_usage(response)
+                
+                comparison_result = response.text
+                
+                # Parse the response to extract structured data
+                parsed_result = self.parse_comparison_response(comparison_result)
+                parsed_result["raw_response"] = comparison_result
+                
+                return parsed_result
             
         except Exception as e:
             logger.error(f"Error comparing images: {e}")
@@ -405,12 +522,11 @@ class ImageProductMatcher:
             logger.info(f"  ★ SIMILARITY SCORE: {score:.3f} ({confidence}) | Interchangeable: {interchangeable}")
             logger.info(f"    {their_name} ←→ {our_name}")
             
-            if score >= 0.8:
+            # Adjusted thresholds for embedding similarity normalization
+            if score >= 0.95:
                 logger.info(f"    🟢 EXCELLENT MATCH - Very high similarity!")
-            elif score >= 0.6:
+            elif score >= 0.80:
                 logger.info(f"    🟡 GOOD MATCH - Moderate similarity")
-            elif score >= 0.4:
-                logger.info(f"    🟠 WEAK MATCH - Low similarity")
             else:
                 logger.info(f"    🔴 POOR MATCH - Very low similarity")
                 

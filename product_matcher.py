@@ -104,6 +104,9 @@ class ProductMatcher:
             # Calculate text similarity
             similarity_score = self.calculate_text_similarity(competitor_desc, fishbowl_desc)
             
+            # Log detailed comparison with colored icons
+            self._log_comparison_result(competitor_desc, fishbowl_desc, fishbowl_product['sku'], similarity_score)
+            
             match_info = {
                 'fishbowl_sku': fishbowl_product['sku'],
                 'fishbowl_description': fishbowl_desc,
@@ -122,6 +125,30 @@ class ProductMatcher:
         matches.sort(key=lambda x: x['similarity_score'], reverse=True)
         
         return matches
+    
+    def _log_comparison_result(self, competitor_desc: str, fishbowl_desc: str, fishbowl_sku: str, similarity_score: float):
+        """Log detailed comparison result with colored icons and text comparison"""
+        # Determine match quality and icon
+        if similarity_score >= 0.8:
+            icon = "🟢"
+            quality = "EXCELLENT MATCH"
+        elif similarity_score >= self.confidence_threshold:
+            icon = "🟡" 
+            quality = "GOOD MATCH"
+        elif similarity_score >= 0.4:
+            icon = "🟠"
+            quality = "FAIR MATCH"
+        else:
+            icon = "🔴"
+            quality = "POOR MATCH"
+        
+        # Log the similarity score with icon
+        logger.info(f"  ★ SIMILARITY SCORE: {similarity_score:.3f} | {icon} {quality}")
+        
+        # Log the text comparison
+        logger.info(f"     COMPETITOR: \"{competitor_desc}\"")
+        logger.info(f"     OUR PRODUCT: \"{fishbowl_desc}\" (SKU: {fishbowl_sku})")
+        logger.info(f"     ---")
     
     def process_competitor_quote(self) -> List[Dict]:
         """Process entire competitor quote and find matches for each product"""
@@ -176,7 +203,27 @@ class ProductMatcher:
             }
             
             self.results.append(result)
-            logger.info(f"Best match for {competitor_product['competitor_sku']}: {result['our_sku']} (confidence: {result['match_confidence_score']:.3f})")
+            
+            # Log best match summary with colored icon
+            if best_match:
+                if result['match_confidence_score'] >= 0.8:
+                    icon = "🟢"
+                    quality = "EXCELLENT"
+                elif result['match_confidence_score'] >= self.confidence_threshold:
+                    icon = "🟡"
+                    quality = "GOOD" 
+                elif result['match_confidence_score'] >= 0.4:
+                    icon = "🟠"
+                    quality = "FAIR"
+                else:
+                    icon = "🔴"
+                    quality = "POOR"
+                
+                logger.info(f"🎯 BEST MATCH for {competitor_product['competitor_sku']}: {result['our_sku']} | {icon} {quality} ({result['match_confidence_score']:.3f})")
+                logger.info(f"   💰 Price: ${result['our_unit_price']:.2f} vs ${result['competitor_unit_price']:.2f} | Savings: ${result['potential_savings']:.2f}")
+                logger.info(f"   📦 Stock: {result['our_stock_quantity']} units | Category: {result['our_category']}")
+            else:
+                logger.info(f"❌ NO MATCH FOUND for {competitor_product['competitor_sku']}")
         
         return self.results
     
