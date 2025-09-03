@@ -273,10 +273,22 @@ def main():
         # Process matching
         results = matcher.process_competitor_quote()
         
-        # Debug: Print results summary
+        # Print results summary with colored icons
         logger.info(f"Processed {len(results)} competitor products")
         for result in results:
-            logger.info(f"  {result['competitor_sku']} -> {result['our_sku']} (confidence: {result['match_confidence_score']:.3f})")
+            confidence = result['match_confidence_score']
+            
+            # Determine color icon based on confidence score
+            if confidence >= 0.8:
+                icon = "🟢"
+            elif confidence >= self.confidence_threshold:
+                icon = "🟡"
+            elif confidence >= 0.4:
+                icon = "🟠"
+            else:
+                icon = "🔴"
+            
+            logger.info(f"  {icon} {result['competitor_sku']} -> {result['our_sku']} (confidence: {confidence:.3f})")
         
         # Export results
         output_file = matcher.export_results()
