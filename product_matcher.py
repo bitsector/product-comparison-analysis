@@ -15,6 +15,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 import json
 from datetime import datetime
 
+# Try to import sentence-transformers for local embeddings
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+
 # Load environment variables
 load_dotenv()
 
@@ -30,11 +37,23 @@ class ProductMatcher:
     
     def __init__(self):
         """Initialize the ProductMatcher with Gemini client and configuration"""
-        genai.configure(api_key=os.getenv('GOOGLE_AI_API_KEY'))
+        self.embeddings_engine = os.getenv('TEXT_EMBEDDINGS_ENGINE', 'llm').lower()
         self.confidence_threshold = float(os.getenv('MATCH_CONFIDENCE_THRESHOLD', 0.7))
         self.fishbowl_data = None
         self.competitor_data = None
         self.results = []
+        
+        # Initialize embedding models based on configuration
+        if self.embeddings_engine == 'local':
+            if not SENTENCE_TRANSFORMERS_AVAILABLE:
+                raise ImportError("sentence-transformers not installed. Run: pip install sentence-transformers")
+            logger.info("Loading local embedding model (all-MiniLM-L6-v2)...")
+            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("Local embedding model loaded successfully")
+        else:
+            # LLM mode - configure Gemini
+            genai.configure(api_key=os.getenv('GOOGLE_AI_API_KEY'))
+            logger.info("Using Gemini API for embeddings")
         
     def load_fishbowl_data(self, file_path: str = 'mock_data/fishbowl_inventory.csv') -> pd.DataFrame:
         """Load Fishbowl WMS inventory data from CSV file"""
@@ -59,14 +78,20 @@ class ProductMatcher:
             raise
     
     def get_text_embedding(self, text: str) -> List[float]:
-        """Get text embedding using Gemini's text embedding model"""
+        """Get text embedding using either local model or Gemini API"""
         try:
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="semantic_similarity"
-            )
-            return result['embedding']
+            if self.embeddings_engine == 'local':
+                # Use local sentence-transformers model
+                embedding = self.embedding_model.encode(text)
+                return embedding.tolist()  # Convert numpy array to list
+            else:
+                # Use Gemini API
+                result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=text,
+                    task_type="semantic_similarity"
+                )
+                return result['embedding']
         except Exception as e:
             logger.error(f"Error getting embedding for text: {text[:50]}... - {e}")
             return []
@@ -227,10 +252,15 @@ class ProductMatcher:
         
         return self.results
     
-    def export_results(self, output_file: str = 'output/product_matching_results.csv') -> str:
+    def export_results(self, output_file: str = None) -> str:
         """Export matching results to CSV file"""
         if not self.results:
             raise ValueError("No results to export. Run process_competitor_quote() first.")
+        
+        # Generate filename with embedding engine and timestamp if not provided
+        if output_file is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = f'output/product_matching_results_{self.embeddings_engine}_{timestamp}.csv'
         
         try:
             # Create output directory if it doesn't exist
@@ -281,7 +311,7 @@ def main():
             # Determine color icon based on confidence score
             if confidence >= 0.8:
                 icon = "🟢"
-            elif confidence >= self.confidence_threshold:
+            elif confidence >= matcher.confidence_threshold:
                 icon = "🟡"
             elif confidence >= 0.4:
                 icon = "🟠"

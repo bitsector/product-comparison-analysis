@@ -1,5 +1,0 @@
-their_image,best_match_image,similarity_score,match_confidence,match_type,interchangeable,processed_timestamp
-commercial pre rinse spray faucet restaurant kitchen industrial.png,pulldown_kitchen_faucet_1.png,0.9325408419007786,MEDIUM,VECTOR_SIMILARITY,YES,2025-09-03T16:29:25.054961
-double_handed_faucet_2.png,double_handed_faucet_1.png,0.9210009927160603,MEDIUM,VECTOR_SIMILARITY,YES,2025-09-03T16:29:55.551102
-pot filler faucet wall mount swing arm double jointed.png,pulldown_kitchen_faucet_1.png,0.9069370342930814,MEDIUM,VECTOR_SIMILARITY,YES,2025-09-03T16:30:25.954408
-pulldow_kitchen_faucet_2.png,pulldown_kitchen_faucet_1.png,0.9508146817826004,HIGH,VECTOR_SIMILARITY,YES,2025-09-03T16:30:59.423359
